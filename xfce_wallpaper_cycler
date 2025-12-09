@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import os
+import random
+import subprocess
+from dataclasses import dataclass
+from typing import Any, Dict, List, Union, Protocol, Literal
+from pathlib import Path 
+from argparse import Namespace
+
+
+@dataclass(frozen=True)
+class Args():
+    property: str
+    wallpaper_folder: str
+
+
+def _main(args: Args) -> None:
+	already_displayed_cache_file: str = f"{os.environ["HOME"]}/.config/xfce_wallpaper_cycler/already_displayed_cache.json"
+	already_displayed_cache: Union[Dict[str, Any], List[Any]] = _get_data_from_json(already_displayed_cache_file)
+	
+	if not isinstance(already_displayed_cache, list):
+		print("already_displayed_cache is not List, exiting.")
+	
+		return
+	
+	files: List[str] = _get_folder_files(args.wallpaper_folder)
+	already_displayed_files = set(already_displayed_cache)
+	remaining_bgs = [item for item in files if item not in already_displayed_files]
+	
+	if len(remaining_bgs) == 0:
+		already_displayed_files = []
+		remaining_bgs = files[:]
+	
+	random_i: int = random.randrange(len(remaining_bgs))
+	selected_bg: str = remaining_bgs.pop(random_i)
+	command_list: List[str] = [
+		"xfconf-query",
+		"--channel",
+		"xfce4-desktop",
+		"--property",
+		args.property,
+		"--set",
+		selected_bg
+	]	
+	
+	try:
+		result = subprocess.run(
+			command_list,
+			capture_output=True,
+			text=True,
+			check=True,
+			shell=False
+		)
+		print(result.stdout)
+	except subprocess.CalledProcessError as e:
+		print(e.stderr)
+		
+		return
+	except FileNotFoundError:
+		print("xfconf-query not found.")
+		
+		return
+	
+	try:
+		with open(already_displayed_cache_file, "w") as f:
+			json.dump([*already_displayed_files, selected_bg], f, indent=4)
+	except:
+		print("Couldn't push back to already_displayed_cache.")
+
+
+def _get_folder_files(directory_path: str) -> List[str]:
+	file_list: List[str] = []
+	
+	for entry in os.listdir(directory_path):
+		full_path: str = os.path.join(directory_path, entry)
+	
+		if os.path.isfile(full_path):
+			file_list.append(full_path)
+	
+	return file_list
+
+	
+def _get_data_from_json(file: str) -> Union[Dict[str, Any], List[Any]]:
+	env_home: str = os.getenv("HOME")
+	path: Path = Path(file)
+	path.parent.mkdir(parents=True, exist_ok=True)
+	
+	if not path.is_file():
+		try:
+			with open(file, "w") as f:
+				f.write("[]")
+		except:
+			print("Failed to initialize already_displayed_cache.")
+			
+			return {} 
+	
+	try:
+		with open(file, "r", encoding="utf-8") as f:
+			data = json.load(f)
+
+			return data
+	except:
+		print("Failed parsing already_displayed_cache.json.")
+	
+		return {}
+
+
+if __name__ == "__main__":
+	parser = argparse.ArgumentParser(
+		description="A script to cycle wallpapers on the XFCE desktop environment."
+	)
+	parser.add_argument(
+		"-p", 
+		"--property", 
+		dest="property",
+		help="The xfconf-query property that contains the current background path. Find it using 'xfconf-query --channel xfce4-desktop --list'."
+	) 
+	parser.add_argument(
+		"-w",
+		"--wallpaper-folder",
+		dest="wallpaper_folder",
+		help="The folder that contains your wallpaper files."
+	)
+	_main(Args(**vars(parser.parse_args())))
+
+
+
+
